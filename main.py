@@ -2,6 +2,7 @@ from flask import Flask, jsonify, request, make_response, redirect, flash
 from werkzeug.utils import secure_filename
 import os
 
+
 app = Flask(__name__)
 
 # Flask confs
@@ -60,4 +61,4 @@ def main():
 
 
 if __name__ == '__main__':
-    app.run()
+    app.run(host='0.0.0.0')
