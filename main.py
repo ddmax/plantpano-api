@@ -1,21 +1,28 @@
 import logging
-
-from flask import Flask, jsonify, request, make_response, redirect, flash
-from werkzeug.utils import secure_filename
 import os
+
+import numpy as np
 import tensorflow as tf
-
-
-app = Flask(__name__)
+from flask import Flask, jsonify, request, redirect, flash
+from flask.helpers import make_response
+from werkzeug.utils import secure_filename
 
 # Flask confs
-DATA_DIRNAME = os.path.join(app.root_path, 'data/')
-UPLOAD_FOLDER = os.path.join(app.root_path, 'uploads/')
+app = Flask(__name__)
+UPLOAD_FOLDER = os.path.join(app.root_path, 'uploads')
 ALLOWED_EXTENSIONS = set(['jpg', 'jpeg', 'png', 'gif', 'tiff', 'bmp'])
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
 app.config['SECRET_KEY'] = '{ddmax}'
 app.config['DEBUG'] = True
+
+# Tensorflow confs
+NUM_CLASSES = 5
+NUM_TOP_CLASSES = 5
+DATA_DIRNAME = os.path.join(app.root_path, 'data')
+
+# Response codes and messages
+CODE_CLASSIFY_SUCCESS = 0
+MESSAGE_CLASSSIFY_SUCCESS = 'success'
 
 
 def convolutional(input):
@@ -29,49 +36,53 @@ def allowed_file(filename):
 
 class PlantClassifier:
     default_args = {
-        'model_def_file': '{}/model'.format(DATA_DIRNAME),
-        'class_labels_file': '{}/labels.txt'.format(DATA_DIRNAME)
+        'model_graph_def_file': os.path.join(DATA_DIRNAME, 'model.pb'),
+        'class_labels_file': os.path.join(DATA_DIRNAME, 'labels.txt')
     }
     for k, v in default_args.items():
         if not os.path.exists(v):
             raise Exception("File {} not found at {}".format(k, v))
 
-    def __init__(self, model_def_file, class_lables_file):
+    def __init__(self, model_graph_def_file, class_labels_file):
         logging.info('Loading model data and labels...')
 
-        with tf.Graph().as_default(), tf.device('cpu:0'):
-            self.sess = tf.Session()
-            self.image_buffer = tf.placeholder(tf.string)
-            image = tf.image.decode_jpeg(self.image_buffer, channels=3)
-            image = tf.image.convert_image_dtype(image, dtype=tf.float32)
-            image = self.eval_image(image, 299, 299)
-            image = tf.sub(image, 0.5)
-            image = tf.mul(image, 2.0)
-            images = tf.expand_dims(image, 0)
+        # Read model
+        self.graph = self.load_graph(model_graph_def_file)
+        # Read labels
+        self.labels = self.load_labels(class_labels_file)
 
-            # Run inference with Inception v3 model
+    def load_graph(self, model_graph_def_file):
+        with tf.gfile.FastGFile(model_graph_def_file, 'rb') as f:
+            graph_def = tf.GraphDef()
+            graph_def.ParseFromString(f.read())
+        with tf.Graph().as_default() as graph:
+            tf.import_graph_def(graph_def, name='')
+        return graph
 
-    def eval_image(self, image, height, width, scope=None):
-        """Prepare one image for evaluation.
-        Args:
-          image: 3-D float Tensor
-          height: integer
-          width: integer
-          scope: Optional scope for op_scope.
-        Returns:
-          3-D float Tensor of prepared image.
-        """
-        with tf.op_scope([image, height, width], scope, 'eval_image'):
-            # Crop the central region of the image with an area containing 87.5% of
-            # the original image.
-            image = tf.image.central_crop(image, central_fraction=0.875)
+    def load_labels(self, class_labels_file):
+        labels_file = open(class_labels_file)
+        lines = labels_file.read().splitlines()
+        return [str(w) for w in lines]
 
-            # Resize the image to the original height and width.
-            image = tf.expand_dims(image, 0)
-            image = tf.image.resize_bilinear(image, [height, width],
-                                             align_corners=False)
-            image = tf.squeeze(image, [0])
-            return image
+    def classify_image(self, image, from_file=False):
+        result = dict()
+
+        image_data = tf.gfile.FastGFile(image, 'rb').read() if from_file \
+            else tf.gfile.FastGFile(image, 'rb')
+
+        with tf.Session(graph=self.graph) as sess:
+            softmax_tensor = sess.graph.get_tensor_by_name('final_result:0')
+            predictions = sess.run(softmax_tensor, {'DecodeJpeg/contents:0': image_data})
+            predictions = np.squeeze(predictions)
+
+            top_k = predictions.argsort()[-5:][::-1]
+
+            for node_id in top_k:
+                plant_name = self.labels[node_id]
+                score = format(predictions[node_id], '.4f')
+                result[plant_name] = score
+
+            return result
 
 
 @app.route('/api/image', methods=['GET', 'POST'])
@@ -87,14 +98,18 @@ def upload_image():
             flash('No selected file')
             return redirect(request.url)
         if file and allowed_file(file.filename):
-            file.save(os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(file.filename)))
-            res = make_response(jsonify(message='Image upload successfully!'), 201)
-            return res
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(file.filename))
+            file.save(file_path)
 
-            # Convolutional
-            # input = '--- Image data here ---'
-            # output = convolutional(input)
-            # return jsonify(result=output)
+            # Start classify image
+            ret = app.classifier.classify_image(file_path, from_file=True)
+            return make_response(jsonify(
+                code=CODE_CLASSIFY_SUCCESS,
+                message=MESSAGE_CLASSSIFY_SUCCESS,
+                result=ret),
+                200
+            )
+
     return '''
     <!doctype html>
     <title>Upload new File</title>
@@ -111,5 +126,10 @@ def main():
     return 'Hello PlantPano!'
 
 
-if __name__ == '__main__':
+def setup_app():
+    app.classifier = PlantClassifier(**PlantClassifier.default_args)
     app.run(host='0.0.0.0')
+
+
+if __name__ == '__main__':
+    setup_app()
