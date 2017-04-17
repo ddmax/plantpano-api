@@ -114,7 +114,39 @@ comments = {
     'schema': {
         'content': {
             'type': 'string',
+        },
+        'user': {
+            'type': 'objectid',
+            'data_relation': {
+                'resource': 'users',
+                'field': '_id',
+                'embeddable': True,
+            }
+        },
+    }
+}
+articles = {
+    'item_title': 'articles',
+    'schema': {
+        'title': {
+            'type': 'string',
+            'required': True,
+        },
+        'author': {
+            'type': 'string',
+        },
+        'view': {
+            'type': 'integer',
+        },
+        'detail_link': {
+            'type': 'string',
         }
+    }
+}
+articles_detail = {
+    'item_title': 'articles_detail',
+    'schema': {
+
     }
 }
 
