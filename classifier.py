@@ -32,7 +32,7 @@ class PlantClassifier:
         return graph
 
     def load_labels(self, class_labels_file):
-        labels_file = open(class_labels_file)
+        labels_file = open(class_labels_file, encoding='utf-8')
         lines = labels_file.read().splitlines()
         return [str(w) for w in lines]
 
