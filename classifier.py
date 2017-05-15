@@ -1,7 +1,10 @@
-import tensorflow as tf
-import numpy as np
-import os
+import json
 import logging
+import os
+import time
+
+import numpy as np
+import tensorflow as tf
 
 from settings import TF_DATA_FOLDER
 
@@ -29,14 +32,21 @@ class PlantClassifier:
             graph_def.ParseFromString(f.read())
         with tf.Graph().as_default() as graph:
             tf.import_graph_def(graph_def, name='')
+
+        logging.info("Loaded output_graph.pb")
         return graph
 
     def load_labels(self, class_labels_file):
         labels_file = open(class_labels_file, encoding='utf-8')
         lines = labels_file.read().splitlines()
+        logging.info("Loaded output_labels.txt")
         return [str(w) for w in lines]
 
     def classify_image(self, image, from_file=False):
+        logging.info("Loaded output_graph.pb")
+        logging.info("Loaded output_labels.txt")
+        logging.info('Start classifying...')
+        start = time.clock()
         result = list()
 
         image_data = tf.gfile.FastGFile(image, 'rb').read() if from_file else image
@@ -55,6 +65,10 @@ class PlantClassifier:
                     'name': plant_name,
                     'score': score
                 })
+
+            end = time.clock()
+            logging.info("Elapsed time: %.2fs" % (end - start))
+            logging.info(json.dumps(result, indent=4, sort_keys=True))
 
             return result
 
